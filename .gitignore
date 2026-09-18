@@ -1,0 +1,9 @@
+# Local build artifacts
+dist/
+
+# Temporary build metadata
+.build-*
+
+# Editor/OS noise
+.DS_Store
+Thumbs.db
