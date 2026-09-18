@@ -5,61 +5,53 @@ set -eu
 # Script:       publish.sh
 # Author:       Andrew J. Moore
 # Date:         2026-09-18
-# Revision:     r2
+# Revision:     r3
 #
 # Description:
 #   Publish previously built canonical Caddy release artifacts.
 #
-#   This script does not rebuild anything.
-#
-#   Targets:
+#   Artifact classes:
 #     image
-#       Publishes the existing multi-platform OCI archive to GHCR as:
-#
+#       Publish the existing multi-platform OCI archive to GHCR as:
 #         ghcr.io/gesandrewmoore/caddy:<VERSION>
 #         ghcr.io/gesandrewmoore/caddy:latest
 #
-#       The complete OCI image index, including linux/amd64 and linux/arm64,
-#       is copied from the existing archive with skopeo.
+#     binary
+#       Publish standalone binary packages to GitHub Release v<VERSION>.
 #
-#     windows
-#       Publishes the existing Windows ZIP archive to the GitHub Release:
+#       Canonical packages:
+#         caddy-<VERSION>-linux-amd64.tar.gz
+#         caddy-<VERSION>-linux-arm64.tar.gz
+#         caddy-<VERSION>-windows-amd64.zip
 #
-#         v<VERSION>
+#   This script never rebuilds artifacts.
 #
-#       If the release already exists, the asset is replaced in place.
-#
-#   Stable publication policy:
-#     - The working tree must be clean.
-#     - origin/main is fetched before publishing.
-#     - If the current commit is not contained in origin/main, publication
-#       requires an explicit [y/N] confirmation.
-#     - The latest stable upstream Caddy release determines VERSION.
-#     - Required build artifacts must already exist under dist/.
+# Publication policy:
+#   - Working tree must be clean.
+#   - origin refs are fetched before publication.
+#   - Image publication keeps the existing origin/main ancestry warning with
+#     an explicit [y/N] override.
+#   - Binary publication also warns when HEAD is not contained in origin/main.
+#   - Creating a new GitHub Release additionally requires the current commit to
+#     exist on at least one fetched origin branch or tag. This cannot be
+#     overridden because GitHub cannot target an unpushed commit.
+#   - Updating assets on an existing GitHub Release does not require the current
+#     commit to be pushed, though the normal origin/main warning still applies.
 #
 # Authentication:
-#   GHCR:
-#     GHCR_PAT_OP_REF must point to a 1Password item, not an individual field.
-#     The item must contain:
+#   GHCR_PAT_OP_REF points to a 1Password item containing:
+#     username
+#     credential
 #
-#       username
-#       credential
-#
-#     The credential must have permission to publish to GHCR.
-#
-#   GitHub Releases:
-#     GITHUB_PAT_OP_REF may point to a separate 1Password item with the same
-#     username/credential field convention. If omitted, GHCR_PAT_OP_REF is
-#     reused. The credential must have sufficient GitHub repository
-#     permissions to create releases and upload assets.
-#
-# Optional environment:
-#   GHCR_PAT_OP_REF     Required for image publication; 1Password item ref
-#   GITHUB_PAT_OP_REF   Optional; defaults to GHCR_PAT_OP_REF
+#   GITHUB_PAT_OP_REF may point to a separate item using the same convention.
+#   If omitted, GHCR_PAT_OP_REF is reused.
 #
 # Usage:
 #   ./scripts/publish.sh --target image
-#   ./scripts/publish.sh --target windows
+#   ./scripts/publish.sh --target binary
+#   ./scripts/publish.sh --target binary --os linux
+#   ./scripts/publish.sh --target binary --os linux --arch arm64
+#   ./scripts/publish.sh --target binary --os windows --arch amd64
 # =============================================================================
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
@@ -73,19 +65,34 @@ GITHUB_REPO="gesandrewmoore/caddy"
 GHCR_REGISTRY="ghcr.io"
 
 TARGET=""
+OS=""
+ARCH=""
 
 usage() {
     cat <<'EOF'
 Usage:
   publish.sh --target image
-  publish.sh --target windows
+  publish.sh --target binary [--os <os> [--arch <arch>]]
 
 Targets:
-  image       Publish the existing multi-platform OCI archive to GHCR as
-              <VERSION> and latest.
+  image
+    Publish the existing multi-platform OCI archive to GHCR as <VERSION> and
+    latest.
 
-  windows     Publish the existing Windows ZIP to GitHub Release v<VERSION>.
-              If that release already exists, replace the asset in place.
+  binary
+    Publish standalone binary packages to GitHub Release v<VERSION>.
+
+    With no --os/--arch:
+      Publishes all canonical binary packages:
+        linux/amd64
+        linux/arm64
+        windows/amd64
+
+    --os linux:
+      Publishes both Linux packages unless --arch restricts it.
+
+    --os windows:
+      Publishes windows/amd64.
 
 This script publishes existing artifacts only. It never rebuilds them.
 EOF
@@ -150,11 +157,32 @@ require_clean_tree() {
     fi
 }
 
-check_origin_main() {
-    echo "Fetching origin/main..."
-    git -C "$REPO_DIR" fetch --quiet origin main
+fetch_origin_refs() {
+    echo "Fetching origin refs..."
+    git -C "$REPO_DIR" fetch --quiet --prune --tags origin \
+        '+refs/heads/*:refs/remotes/origin/*'
+}
 
-    if git -C "$REPO_DIR" merge-base --is-ancestor "$GIT_COMMIT" origin/main; then
+head_in_origin_main() {
+    git -C "$REPO_DIR" merge-base --is-ancestor "$GIT_COMMIT" origin/main >/dev/null 2>&1
+}
+
+head_exists_on_origin() {
+    if git -C "$REPO_DIR" branch -r --contains "$GIT_COMMIT" |
+        grep -q '^[[:space:]]*origin/'; then
+        return 0
+    fi
+
+    if git -C "$REPO_DIR" tag --contains "$GIT_COMMIT" |
+        grep -q .; then
+        return 0
+    fi
+
+    return 1
+}
+
+warn_if_not_origin_main() {
+    if head_in_origin_main; then
         return
     fi
 
@@ -197,6 +225,81 @@ read_op_item_field() {
     fi
 
     printf '%s' "$VALUE"
+}
+
+github_item_ref() {
+    REF="${GITHUB_PAT_OP_REF:-${GHCR_PAT_OP_REF:-}}"
+
+    if [ -z "$REF" ]; then
+        echo "Error: GITHUB_PAT_OP_REF or GHCR_PAT_OP_REF is required for GitHub Release publication." >&2
+        exit 1
+    fi
+
+    printf '%s' "$REF"
+}
+
+binary_artifact_path() {
+    BINARY_OS="$1"
+    BINARY_ARCH="$2"
+
+    case "$BINARY_OS/$BINARY_ARCH" in
+        linux/amd64|linux/arm64)
+            printf '%s/caddy-%s-linux-%s.tar.gz' "$DIST_DIR" "$CADDY_VERSION" "$BINARY_ARCH"
+            ;;
+        windows/amd64)
+            printf '%s/caddy-%s-windows-amd64.zip' "$DIST_DIR" "$CADDY_VERSION"
+            ;;
+        *)
+            echo "Error: unsupported binary platform: $BINARY_OS/$BINARY_ARCH" >&2
+            exit 1
+            ;;
+    esac
+}
+
+append_binary_artifact() {
+    PATH_TO_ADD="$(binary_artifact_path "$1" "$2")"
+
+    if [ ! -f "$PATH_TO_ADD" ]; then
+        echo "Error: binary release artifact not found:" >&2
+        echo "  $PATH_TO_ADD" >&2
+        exit 1
+    fi
+
+    if [ -z "${BINARY_ARTIFACTS:-}" ]; then
+        BINARY_ARTIFACTS="$PATH_TO_ADD"
+    else
+        BINARY_ARTIFACTS="$BINARY_ARTIFACTS
+$PATH_TO_ADD"
+    fi
+}
+
+select_binary_artifacts() {
+    BINARY_ARTIFACTS=""
+
+    if [ -z "$OS" ]; then
+        append_binary_artifact linux amd64
+        append_binary_artifact linux arm64
+        append_binary_artifact windows amd64
+        return
+    fi
+
+    case "$OS" in
+        linux)
+            if [ -n "$ARCH" ]; then
+                append_binary_artifact linux "$ARCH"
+            else
+                append_binary_artifact linux amd64
+                append_binary_artifact linux arm64
+            fi
+            ;;
+        windows)
+            if [ -n "$ARCH" ] && [ "$ARCH" != "amd64" ]; then
+                echo "Error: Windows binary publication currently supports amd64 only." >&2
+                exit 1
+            fi
+            append_binary_artifact windows amd64
+            ;;
+    esac
 }
 
 publish_image() {
@@ -288,53 +391,59 @@ publish_image() {
     echo "  Digest: $VERSION_DIGEST"
 }
 
-publish_windows() {
-    ARTIFACT="$DIST_DIR/caddy-${CADDY_VERSION}-windows-amd64.zip"
+publish_binaries() {
+    select_binary_artifacts
+
+    ITEM_REF="$(github_item_ref)"
+    GITHUB_PAT="$(read_op_item_field "$ITEM_REF" "credential" "GitHub PAT 1Password item")"
     RELEASE_TAG="v${CADDY_VERSION}"
 
-    if [ ! -f "$ARTIFACT" ]; then
-        echo "Error: Windows release artifact not found:" >&2
-        echo "  $ARTIFACT" >&2
+    RELEASE_EXISTS=0
+    if GH_TOKEN="$GITHUB_PAT" gh release view "$RELEASE_TAG" \
+        --repo "$GITHUB_REPO" >/dev/null 2>&1; then
+        RELEASE_EXISTS=1
+    fi
+
+    if [ "$RELEASE_EXISTS" -eq 0 ] && ! head_exists_on_origin; then
+        echo "Error: cannot create GitHub Release $RELEASE_TAG because the current" >&2
+        echo "commit is not present on any fetched origin branch or tag." >&2
         echo >&2
-        echo "Build it first with:" >&2
-        echo "  ./scripts/build.sh --target windows" >&2
+        echo "  Current branch: $GIT_BRANCH" >&2
+        echo "  Current commit: $GIT_SHORT" >&2
+        echo >&2
+        echo "Push the commit to GitHub, then retry." >&2
         exit 1
     fi
-
-    GITHUB_ITEM_REF="${GITHUB_PAT_OP_REF:-${GHCR_PAT_OP_REF:-}}"
-
-    if [ -z "$GITHUB_ITEM_REF" ]; then
-        echo "Error: GITHUB_PAT_OP_REF or GHCR_PAT_OP_REF is required to publish the GitHub Release." >&2
-        exit 1
-    fi
-
-    GITHUB_PAT="$(read_op_item_field "$GITHUB_ITEM_REF" "credential" "GitHub PAT 1Password item")"
 
     echo
-    echo "Publishing release Windows artifact..."
-    echo "  Artifact:       $ARTIFACT"
+    echo "Publishing release binary artifacts..."
     echo "  GitHub repo:    $GITHUB_REPO"
     echo "  Release tag:    $RELEASE_TAG"
     echo "  Git branch:     $GIT_BRANCH"
     echo "  Git commit:     $GIT_SHORT"
+    echo "  Artifacts:"
+    printf '%s\n' "$BINARY_ARTIFACTS" | while IFS= read -r FILE; do
+        echo "    $(basename "$FILE")"
+    done
     echo
 
-    if GH_TOKEN="$GITHUB_PAT" gh release view "$RELEASE_TAG" \
-        --repo "$GITHUB_REPO" >/dev/null 2>&1; then
-
-        echo "GitHub Release already exists; replacing matching asset..."
+    if [ "$RELEASE_EXISTS" -eq 1 ]; then
+        echo "GitHub Release already exists; replacing matching assets..."
         echo
 
-        GH_TOKEN="$GITHUB_PAT" gh release upload "$RELEASE_TAG" \
-            "$ARTIFACT" \
-            --repo "$GITHUB_REPO" \
-            --clobber
+        printf '%s\n' "$BINARY_ARTIFACTS" | while IFS= read -r FILE; do
+            GH_TOKEN="$GITHUB_PAT" gh release upload "$RELEASE_TAG" \
+                "$FILE" \
+                --repo "$GITHUB_REPO" \
+                --clobber
+        done
     else
         echo "Creating GitHub Release..."
         echo
 
+        # shellcheck disable=SC2086
         GH_TOKEN="$GITHUB_PAT" gh release create "$RELEASE_TAG" \
-            "$ARTIFACT" \
+            $(printf '%s\n' "$BINARY_ARTIFACTS") \
             --repo "$GITHUB_REPO" \
             --target "$GIT_COMMIT" \
             --title "Caddy ${CADDY_VERSION}" \
@@ -345,9 +454,8 @@ publish_windows() {
     unset GITHUB_PAT
 
     echo
-    echo "Release Windows publication complete:"
+    echo "Release binary publication complete:"
     echo "  GitHub Release: $RELEASE_TAG"
-    echo "  Asset:          $(basename "$ARTIFACT")"
 }
 
 # -----------------------------------------------------------------------------
@@ -357,11 +465,18 @@ publish_windows() {
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --target)
-            if [ "$#" -lt 2 ]; then
-                echo "Error: --target requires a value." >&2
-                exit 1
-            fi
+            [ "$#" -ge 2 ] || { echo "Error: --target requires a value." >&2; exit 1; }
             TARGET="$2"
+            shift 2
+            ;;
+        --os)
+            [ "$#" -ge 2 ] || { echo "Error: --os requires a value." >&2; exit 1; }
+            OS="$2"
+            shift 2
+            ;;
+        --arch)
+            [ "$#" -ge 2 ] || { echo "Error: --arch requires a value." >&2; exit 1; }
+            ARCH="$2"
             shift 2
             ;;
         -h|--help)
@@ -378,7 +493,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$TARGET" in
-    image|windows)
+    image|binary)
         ;;
     "")
         echo "Error: --target is required." >&2
@@ -391,6 +506,43 @@ case "$TARGET" in
         exit 1
         ;;
 esac
+
+if [ -n "$OS" ]; then
+    case "$OS" in
+        linux|windows)
+            ;;
+        *)
+            echo "Error: unsupported OS: $OS" >&2
+            exit 1
+            ;;
+    esac
+fi
+
+if [ -n "$ARCH" ]; then
+    case "$ARCH" in
+        amd64|arm64)
+            ;;
+        *)
+            echo "Error: unsupported architecture: $ARCH" >&2
+            exit 1
+            ;;
+    esac
+fi
+
+if [ "$TARGET" = "image" ] && { [ -n "$OS" ] || [ -n "$ARCH" ]; }; then
+    echo "Error: --os/--arch are only valid with --target binary." >&2
+    exit 1
+fi
+
+if [ "$TARGET" = "binary" ] && [ -n "$ARCH" ] && [ -z "$OS" ]; then
+    echo "Error: --arch with --target binary requires --os." >&2
+    exit 1
+fi
+
+if [ "$TARGET" = "binary" ] && [ "$OS" = "windows" ] && [ "$ARCH" = "arm64" ]; then
+    echo "Error: Windows binary publication currently supports amd64 only." >&2
+    exit 1
+fi
 
 # -----------------------------------------------------------------------------
 # Prerequisites and repository state
@@ -406,14 +558,15 @@ case "$TARGET" in
     image)
         require_command skopeo
         ;;
-    windows)
+    binary)
         require_command gh
         ;;
 esac
 
 git_metadata
 require_clean_tree
-check_origin_main
+fetch_origin_refs
+warn_if_not_origin_main
 
 echo
 echo "Checking latest stable Caddy release..."
@@ -427,7 +580,7 @@ case "$TARGET" in
     image)
         publish_image
         ;;
-    windows)
-        publish_windows
+    binary)
+        publish_binaries
         ;;
 esac

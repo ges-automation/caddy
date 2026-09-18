@@ -5,61 +5,51 @@ set -eu
 # Script:       build.sh
 # Author:       Andrew J. Moore
 # Date:         2026-09-18
-# Revision:     r4
+# Revision:     r5
 #
 # Description:
 #   Shared Caddy artifact builder for release and development workflows.
 #
-#   Supported targets:
+#   Artifact classes:
 #     image
-#       Release: builds the canonical linux/amd64 + linux/arm64 image and
-#       exports it as a multi-platform OCI archive under dist/.
+#       OCI/container image.
 #
-#       Dev: builds linux/amd64 + linux/arm64 by default and loads the
-#       multi-platform image into the local Docker image store. --arch may be
-#       used to restrict the build to one architecture.
+#     binary
+#       Standalone Caddy executable package.
 #
-#     windows
-#       Builds a standalone Windows Caddy executable, packages it as an
-#       upstream-style ZIP archive, and writes it under dist/.
+#   Canonical release artifacts:
+#     image:
+#       caddy-<VERSION>-linux-multiarch.oci.tar
+#
+#     binary:
+#       caddy-<VERSION>-linux-amd64.tar.gz
+#       caddy-<VERSION>-linux-arm64.tar.gz
+#       caddy-<VERSION>-windows-amd64.zip
+#
+#   Development artifacts use the same naming with "-dev" after VERSION.
 #
 #   Release builds:
 #     - Automatically discover the latest stable upstream Caddy release.
 #     - Resolve the stable tag to its exact upstream commit before compiling.
 #     - Require a clean Git working tree.
-#     - Produce artifacts suitable for later publication by publish.sh.
 #
 #   Development builds:
 #     - Require --version <ref>.
 #     - Resolve that upstream Caddy ref to an exact commit before compiling.
-#     - Allow a dirty local working tree because artifacts are local-only.
-#     - Use the passed VERSION as the visible artifact identifier, normalized
-#       for Docker/file naming, with a "-dev" suffix.
-#     - Store the exact resolved upstream Caddy commit as provenance metadata.
-#
-# Naming:
-#   Stable image:
-#     caddy:<VERSION>
-#
-#   Dev image:
-#     caddy:<VERSION>-dev
-#
-#   Stable Windows archive:
-#     caddy-<VERSION>-windows-<ARCH>.zip
-#
-#   Dev Windows archive:
-#     caddy-<VERSION>-dev-windows-<ARCH>.zip
-#
-#   Windows archives contain:
-#     caddy.exe
+#     - Allow a dirty local working tree.
+#     - Use the requested ref as the visible version identifier, normalized for
+#       safe Docker/file naming, with "-dev" appended.
 #
 # Usage:
 #   ./scripts/build.sh --target image
-#   ./scripts/build.sh --target windows
+#   ./scripts/build.sh --target binary
+#   ./scripts/build.sh --target binary --os linux --arch amd64
+#   ./scripts/build.sh --target binary --os linux --arch arm64
+#   ./scripts/build.sh --target binary --os windows --arch amd64
 #
 #   ./scripts/build.sh --target image --dev --version master
-#   ./scripts/build.sh --target image --dev --version v2.11.4 --arch arm64
-#   ./scripts/build.sh --target windows --dev --version master --arch amd64
+#   ./scripts/build.sh --target binary --dev --version master
+#   ./scripts/build.sh --target binary --dev --version master --os linux --arch arm64
 # =============================================================================
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
@@ -76,49 +66,57 @@ TARGET=""
 MODE="release"
 REQUESTED_VERSION=""
 ARCH=""
+OS=""
 
 usage() {
     cat <<'EOF'
 Usage:
   build.sh --target image [--dev --version <ref> [--arch <arch>]]
-  build.sh --target windows [--dev --version <ref> [--arch <arch>]]
+  build.sh --target binary [--os <os> [--arch <arch>]] [--dev --version <ref>]
 
 Targets:
-  image       Build a Linux container image.
-  windows     Build a standalone Windows executable ZIP archive.
+  image
+    Build a Linux container image.
 
-Release mode (default):
-  Automatically builds the latest stable Caddy release.
+    Release:
+      Builds linux/amd64 + linux/arm64 and exports a multi-platform OCI archive.
 
-  image:
-    Builds linux/amd64 + linux/arm64 and exports a multi-platform OCI archive.
+    Development:
+      Builds and loads linux/amd64 + linux/arm64 under one local tag by default.
+      --arch may restrict the dev image build to amd64 or arm64.
 
-  windows:
-    Builds windows/amd64 and creates:
-      caddy-<VERSION>-windows-amd64.zip
+  binary
+    Build standalone executable packages.
+
+    With no --os/--arch:
+      Builds all canonical binary packages:
+        linux/amd64
+        linux/arm64
+        windows/amd64
+
+    --os linux:
+      Builds linux/amd64 + linux/arm64 unless --arch restricts it.
+
+    --os windows:
+      Builds windows/amd64. Windows arm64 is not currently supported.
+
+    Package formats:
+      Linux:   caddy-<VERSION>-linux-<ARCH>.tar.gz containing caddy
+      Windows: caddy-<VERSION>-windows-amd64.zip containing caddy.exe
 
 Development mode:
-  --dev                   Build a local development artifact.
-  --version <ref>         Required. May be a branch, tag, or full 40-character
-                          Caddy commit SHA.
+  --dev
+  --version <ref>         Required with --dev. Branch, tag, or full 40-char SHA.
   --arch <arch>           Optional architecture restriction.
-
-  dev image:
-    Without --arch, builds and loads linux/amd64 + linux/arm64 under one tag.
-    With --arch, builds only the requested architecture.
-
-  dev windows:
-    Defaults to amd64 when --arch is omitted.
-
-  Dev artifact names use the requested ref as their visible VERSION identifier,
-  normalized for safe Docker/file naming, with "-dev" appended.
+  --os <os>               Optional binary OS restriction: linux or windows.
 
 Examples:
   ./scripts/build.sh --target image
-  ./scripts/build.sh --target windows
+  ./scripts/build.sh --target binary
+  ./scripts/build.sh --target binary --os linux --arch arm64
   ./scripts/build.sh --target image --dev --version master
-  ./scripts/build.sh --target image --dev --version v2.11.4 --arch arm64
-  ./scripts/build.sh --target windows --dev --version master --arch amd64
+  ./scripts/build.sh --target binary --dev --version master
+  ./scripts/build.sh --target binary --dev --version v2.11.4 --os windows --arch amd64
 EOF
 }
 
@@ -158,14 +156,7 @@ discover_latest_stable() {
     CADDY_VERSION="${RELEASE_TAG#v}"
 }
 
-resolve_release_ref() {
-    resolve_dev_ref "$CADDY_REF"
-
-    CADDY_RELEASE_COMMIT="$CADDY_COMMIT"
-    CADDY_RELEASE_COMMIT_SHORT="$CADDY_COMMIT_SHORT"
-}
-
-resolve_dev_ref() {
+resolve_ref() {
     REF="$1"
 
     case "$REF" in
@@ -257,99 +248,18 @@ require_clean_release_tree() {
     fi
 }
 
-build_release_image() {
-    OUTPUT="$DIST_DIR/caddy-${CADDY_VERSION}-linux-multiarch.oci.tar"
-    VERSION_IMAGE="${IMAGE_REPO}:${CADDY_VERSION}"
-    BUILD_CREATED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+prepare_release() {
+    echo "Checking latest stable Caddy release..."
+    discover_latest_stable
 
-    rm -f "$OUTPUT"
+    echo "Resolving stable Caddy tag to exact upstream commit..."
+    resolve_ref "$CADDY_REF"
 
-    echo
-    echo "Building release Linux image..."
-    echo "  Caddy ref:     $CADDY_REF"
-    echo "  Resolved SHA:  $CADDY_RELEASE_COMMIT_SHORT"
-    echo "  Version:       $CADDY_VERSION"
-    echo "  Platforms:     linux/amd64,linux/arm64"
-    echo "  Image name:    $VERSION_IMAGE"
-    echo "  OCI archive:   $OUTPUT"
-    echo "  Git branch:    $GIT_BRANCH"
-    echo "  Git commit:    $GIT_SHORT"
-    echo
-
-    docker buildx build \
-        --target image \
-        --platform "linux/amd64,linux/arm64" \
-        --build-arg "CADDY_REF=$CADDY_RELEASE_COMMIT" \
-        --build-arg "CADDY_BUILDER_VERSION=$CADDY_VERSION" \
-        --build-arg "CADDY_RUNTIME_VERSION=$CADDY_VERSION" \
-        --label "org.opencontainers.image.title=GES Caddy" \
-        --label "org.opencontainers.image.description=Custom Caddy build with the GES standard plugin set" \
-        --label "org.opencontainers.image.source=$SOURCE_URL" \
-        --label "org.opencontainers.image.version=$CADDY_VERSION" \
-        --label "org.opencontainers.image.revision=$GIT_COMMIT" \
-        --label "org.opencontainers.image.created=$BUILD_CREATED" \
-        --label "io.ges.build.branch=$GIT_BRANCH" \
-        --label "io.ges.build.caddy-ref=$CADDY_REF" \
-        --label "io.ges.build.caddy-revision=$CADDY_RELEASE_COMMIT" \
-        --tag "$VERSION_IMAGE" \
-        --output "type=oci,dest=$OUTPUT" \
-        "$REPO_DIR"
-
-    echo
-    echo "Release image build complete:"
-    echo "  $OUTPUT"
-}
-
-build_release_windows() {
-    ARCH="amd64"
-    TMP_DIR="$(mktemp -d)"
-    ARCHIVE_NAME="caddy-${CADDY_VERSION}-windows-${ARCH}.zip"
-    OUTPUT="$DIST_DIR/$ARCHIVE_NAME"
-
-    cleanup_tmp() {
-        rm -rf "$TMP_DIR"
-    }
-    trap cleanup_tmp EXIT INT TERM
-
-    rm -f "$OUTPUT"
-
-    echo
-    echo "Building release Windows executable..."
-    echo "  Caddy ref:     $CADDY_REF"
-    echo "  Resolved SHA:  $CADDY_RELEASE_COMMIT_SHORT"
-    echo "  Version:       $CADDY_VERSION"
-    echo "  Platform:      windows/$ARCH"
-    echo "  Archive:       $OUTPUT"
-    echo "  Contents:      caddy.exe"
-    echo "  Git branch:    $GIT_BRANCH"
-    echo "  Git commit:    $GIT_SHORT"
-    echo
-
-    docker buildx build \
-        --target binary \
-        --platform "windows/$ARCH" \
-        --build-arg "CADDY_REF=$CADDY_RELEASE_COMMIT" \
-        --build-arg "CADDY_BUILDER_VERSION=$CADDY_VERSION" \
-        --build-arg "CADDY_RUNTIME_VERSION=$CADDY_VERSION" \
-        --output "type=local,dest=$TMP_DIR/export" \
-        "$REPO_DIR"
-
-    if [ ! -f "$TMP_DIR/export/caddy" ]; then
-        echo "Error: expected binary was not exported to $TMP_DIR/export/caddy" >&2
-        exit 1
-    fi
-
-    mkdir -p "$TMP_DIR/archive"
-    mv "$TMP_DIR/export/caddy" "$TMP_DIR/archive/caddy.exe"
-
-    (
-        cd "$TMP_DIR/archive"
-        zip -q "$OUTPUT" caddy.exe
-    )
-
-    echo
-    echo "Release Windows build complete:"
-    echo "  $OUTPUT"
+    BUILD_VERSION="$CADDY_VERSION"
+    BUILD_CADDY_REF="$CADDY_REF"
+    BUILD_CADDY_COMMIT="$CADDY_COMMIT"
+    BUILD_CADDY_COMMIT_SHORT="$CADDY_COMMIT_SHORT"
+    TOOLCHAIN_VERSION="$CADDY_VERSION"
 }
 
 prepare_dev() {
@@ -360,32 +270,77 @@ prepare_dev() {
         exit 1
     fi
 
-    DEV_VERSION="${DEV_VERSION_BASE}-dev"
+    BUILD_VERSION="${DEV_VERSION_BASE}-dev"
 
     echo "Resolving upstream Caddy ref: $REQUESTED_VERSION"
-    resolve_dev_ref "$REQUESTED_VERSION"
+    resolve_ref "$REQUESTED_VERSION"
+
+    BUILD_CADDY_REF="$REQUESTED_VERSION"
+    BUILD_CADDY_COMMIT="$CADDY_COMMIT"
+    BUILD_CADDY_COMMIT_SHORT="$CADDY_COMMIT_SHORT"
 
     echo "Checking latest stable Caddy release for builder/runtime base..."
     discover_latest_stable
     TOOLCHAIN_VERSION="$CADDY_VERSION"
 }
 
-build_dev_image() {
-    prepare_dev
+build_release_image() {
+    OUTPUT="$DIST_DIR/caddy-${BUILD_VERSION}-linux-multiarch.oci.tar"
+    VERSION_IMAGE="${IMAGE_REPO}:${BUILD_VERSION}"
+    BUILD_CREATED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
+    rm -f "$OUTPUT"
+
+    echo
+    echo "Building release Linux image..."
+    echo "  Caddy ref:     $BUILD_CADDY_REF"
+    echo "  Resolved SHA:  $BUILD_CADDY_COMMIT_SHORT"
+    echo "  Version:       $BUILD_VERSION"
+    echo "  Platforms:     linux/amd64,linux/arm64"
+    echo "  Image name:    $VERSION_IMAGE"
+    echo "  OCI archive:   $OUTPUT"
+    echo "  Git branch:    $GIT_BRANCH"
+    echo "  Git commit:    $GIT_SHORT"
+    echo
+
+    docker buildx build \
+        --target image \
+        --platform "linux/amd64,linux/arm64" \
+        --build-arg "CADDY_REF=$BUILD_CADDY_COMMIT" \
+        --build-arg "CADDY_BUILDER_VERSION=$TOOLCHAIN_VERSION" \
+        --build-arg "CADDY_RUNTIME_VERSION=$TOOLCHAIN_VERSION" \
+        --label "org.opencontainers.image.title=GES Caddy" \
+        --label "org.opencontainers.image.description=Custom Caddy build with the GES standard plugin set" \
+        --label "org.opencontainers.image.source=$SOURCE_URL" \
+        --label "org.opencontainers.image.version=$BUILD_VERSION" \
+        --label "org.opencontainers.image.revision=$GIT_COMMIT" \
+        --label "org.opencontainers.image.created=$BUILD_CREATED" \
+        --label "io.ges.build.branch=$GIT_BRANCH" \
+        --label "io.ges.build.caddy-ref=$BUILD_CADDY_REF" \
+        --label "io.ges.build.caddy-revision=$BUILD_CADDY_COMMIT" \
+        --tag "$VERSION_IMAGE" \
+        --output "type=oci,dest=$OUTPUT" \
+        "$REPO_DIR"
+
+    echo
+    echo "Release image build complete:"
+    echo "  $OUTPUT"
+}
+
+build_dev_image() {
     if [ -n "$ARCH" ]; then
         PLATFORMS="linux/$ARCH"
     else
         PLATFORMS="linux/amd64,linux/arm64"
     fi
 
-    LOCAL_IMAGE="${LOCAL_IMAGE_REPO}:${DEV_VERSION}"
+    LOCAL_IMAGE="${LOCAL_IMAGE_REPO}:${BUILD_VERSION}"
     BUILD_CREATED="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
     echo
     echo "Building development Linux image..."
-    echo "  Requested ref: $REQUESTED_VERSION"
-    echo "  Resolved SHA:  $CADDY_COMMIT_SHORT"
+    echo "  Requested ref: $BUILD_CADDY_REF"
+    echo "  Resolved SHA:  $BUILD_CADDY_COMMIT_SHORT"
     echo "  Platforms:     $PLATFORMS"
     echo "  Local image:   $LOCAL_IMAGE"
     echo "  Base version:  $TOOLCHAIN_VERSION"
@@ -402,18 +357,18 @@ build_dev_image() {
     docker buildx build \
         --target image \
         --platform "$PLATFORMS" \
-        --build-arg "CADDY_REF=$CADDY_COMMIT" \
+        --build-arg "CADDY_REF=$BUILD_CADDY_COMMIT" \
         --build-arg "CADDY_BUILDER_VERSION=$TOOLCHAIN_VERSION" \
         --build-arg "CADDY_RUNTIME_VERSION=$TOOLCHAIN_VERSION" \
         --label "org.opencontainers.image.title=GES Caddy Development Build" \
         --label "org.opencontainers.image.description=Development Caddy build with the GES standard plugin set" \
         --label "org.opencontainers.image.source=$SOURCE_URL" \
-        --label "org.opencontainers.image.version=$DEV_VERSION" \
+        --label "org.opencontainers.image.version=$BUILD_VERSION" \
         --label "org.opencontainers.image.revision=$GIT_COMMIT" \
         --label "org.opencontainers.image.created=$BUILD_CREATED" \
         --label "io.ges.build.branch=$GIT_BRANCH" \
-        --label "io.ges.build.caddy-ref=$REQUESTED_VERSION" \
-        --label "io.ges.build.caddy-revision=$CADDY_COMMIT" \
+        --label "io.ges.build.caddy-ref=$BUILD_CADDY_REF" \
+        --label "io.ges.build.caddy-revision=$BUILD_CADDY_COMMIT" \
         --tag "$LOCAL_IMAGE" \
         --load \
         "$REPO_DIR"
@@ -424,44 +379,62 @@ build_dev_image() {
     echo "  Platforms: $PLATFORMS"
 }
 
-build_dev_windows() {
-    [ -n "$ARCH" ] || ARCH="amd64"
+build_binary_one() {
+    BINARY_OS="$1"
+    BINARY_ARCH="$2"
 
-    prepare_dev
+    case "$BINARY_OS/$BINARY_ARCH" in
+        linux/amd64|linux/arm64|windows/amd64)
+            ;;
+        *)
+            echo "Error: unsupported binary platform: $BINARY_OS/$BINARY_ARCH" >&2
+            exit 1
+            ;;
+    esac
 
     TMP_DIR="$(mktemp -d)"
-    ARCHIVE_NAME="caddy-${DEV_VERSION}-windows-${ARCH}.zip"
-    OUTPUT="$DIST_DIR/$ARCHIVE_NAME"
 
-    cleanup_tmp() {
+    cleanup_binary_tmp() {
         rm -rf "$TMP_DIR"
     }
-    trap cleanup_tmp EXIT INT TERM
+    trap cleanup_binary_tmp EXIT INT TERM
 
+    if [ "$BINARY_OS" = "windows" ]; then
+        ARCHIVE_NAME="caddy-${BUILD_VERSION}-windows-${BINARY_ARCH}.zip"
+        INTERNAL_NAME="caddy.exe"
+    else
+        ARCHIVE_NAME="caddy-${BUILD_VERSION}-linux-${BINARY_ARCH}.tar.gz"
+        INTERNAL_NAME="caddy"
+    fi
+
+    OUTPUT="$DIST_DIR/$ARCHIVE_NAME"
     rm -f "$OUTPUT"
 
     echo
-    echo "Building development Windows executable..."
-    echo "  Requested ref: $REQUESTED_VERSION"
-    echo "  Resolved SHA:  $CADDY_COMMIT_SHORT"
-    echo "  Platform:      windows/$ARCH"
+    echo "Building standalone Caddy binary..."
+    echo "  Caddy ref:     $BUILD_CADDY_REF"
+    echo "  Resolved SHA:  $BUILD_CADDY_COMMIT_SHORT"
+    echo "  Version:       $BUILD_VERSION"
+    echo "  Platform:      $BINARY_OS/$BINARY_ARCH"
     echo "  Archive:       $OUTPUT"
-    echo "  Contents:      caddy.exe"
+    echo "  Contents:      $INTERNAL_NAME"
     echo "  Base version:  $TOOLCHAIN_VERSION"
     echo "  Git branch:    $GIT_BRANCH"
     echo "  Git commit:    $GIT_SHORT"
 
-    if [ -n "$(git -C "$REPO_DIR" status --porcelain)" ]; then
-        echo "  Git state:     dirty (allowed for local dev builds)"
-    else
-        echo "  Git state:     clean"
+    if [ "$MODE" = "dev" ]; then
+        if [ -n "$(git -C "$REPO_DIR" status --porcelain)" ]; then
+            echo "  Git state:     dirty (allowed for local dev builds)"
+        else
+            echo "  Git state:     clean"
+        fi
     fi
     echo
 
     docker buildx build \
         --target binary \
-        --platform "windows/$ARCH" \
-        --build-arg "CADDY_REF=$CADDY_COMMIT" \
+        --platform "$BINARY_OS/$BINARY_ARCH" \
+        --build-arg "CADDY_REF=$BUILD_CADDY_COMMIT" \
         --build-arg "CADDY_BUILDER_VERSION=$TOOLCHAIN_VERSION" \
         --build-arg "CADDY_RUNTIME_VERSION=$TOOLCHAIN_VERSION" \
         --output "type=local,dest=$TMP_DIR/export" \
@@ -473,16 +446,50 @@ build_dev_windows() {
     fi
 
     mkdir -p "$TMP_DIR/archive"
-    mv "$TMP_DIR/export/caddy" "$TMP_DIR/archive/caddy.exe"
+    mv "$TMP_DIR/export/caddy" "$TMP_DIR/archive/$INTERNAL_NAME"
 
-    (
-        cd "$TMP_DIR/archive"
-        zip -q "$OUTPUT" caddy.exe
-    )
+    if [ "$BINARY_OS" = "windows" ]; then
+        (
+            cd "$TMP_DIR/archive"
+            zip -q "$OUTPUT" "$INTERNAL_NAME"
+        )
+    else
+        tar -C "$TMP_DIR/archive" -czf "$OUTPUT" "$INTERNAL_NAME"
+    fi
 
     echo
-    echo "Development Windows build complete:"
+    echo "Binary build complete:"
     echo "  $OUTPUT"
+
+    trap - EXIT INT TERM
+    cleanup_binary_tmp
+}
+
+build_selected_binaries() {
+    if [ -z "$OS" ]; then
+        build_binary_one linux amd64
+        build_binary_one linux arm64
+        build_binary_one windows amd64
+        return
+    fi
+
+    case "$OS" in
+        linux)
+            if [ -n "$ARCH" ]; then
+                build_binary_one linux "$ARCH"
+            else
+                build_binary_one linux amd64
+                build_binary_one linux arm64
+            fi
+            ;;
+        windows)
+            if [ -n "$ARCH" ] && [ "$ARCH" != "amd64" ]; then
+                echo "Error: Windows binary builds currently support amd64 only." >&2
+                exit 1
+            fi
+            build_binary_one windows amd64
+            ;;
+    esac
 }
 
 # -----------------------------------------------------------------------------
@@ -492,10 +499,7 @@ build_dev_windows() {
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --target)
-            if [ "$#" -lt 2 ]; then
-                echo "Error: --target requires a value." >&2
-                exit 1
-            fi
+            [ "$#" -ge 2 ] || { echo "Error: --target requires a value." >&2; exit 1; }
             TARGET="$2"
             shift 2
             ;;
@@ -504,19 +508,18 @@ while [ "$#" -gt 0 ]; do
             shift
             ;;
         --version)
-            if [ "$#" -lt 2 ]; then
-                echo "Error: --version requires a value." >&2
-                exit 1
-            fi
+            [ "$#" -ge 2 ] || { echo "Error: --version requires a value." >&2; exit 1; }
             REQUESTED_VERSION="$2"
             shift 2
             ;;
         --arch)
-            if [ "$#" -lt 2 ]; then
-                echo "Error: --arch requires a value." >&2
-                exit 1
-            fi
+            [ "$#" -ge 2 ] || { echo "Error: --arch requires a value." >&2; exit 1; }
             ARCH="$2"
+            shift 2
+            ;;
+        --os)
+            [ "$#" -ge 2 ] || { echo "Error: --os requires a value." >&2; exit 1; }
+            OS="$2"
             shift 2
             ;;
         -h|--help)
@@ -533,7 +536,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 case "$TARGET" in
-    image|windows)
+    image|binary)
         ;;
     "")
         echo "Error: --target is required." >&2
@@ -547,32 +550,54 @@ case "$TARGET" in
         ;;
 esac
 
+if [ -n "$ARCH" ]; then
+    case "$ARCH" in
+        amd64|arm64)
+            ;;
+        *)
+            echo "Error: unsupported architecture: $ARCH" >&2
+            echo "Supported architectures: amd64, arm64" >&2
+            exit 1
+            ;;
+    esac
+fi
+
+if [ -n "$OS" ]; then
+    case "$OS" in
+        linux|windows)
+            ;;
+        *)
+            echo "Error: unsupported OS: $OS" >&2
+            echo "Supported OS values: linux, windows" >&2
+            exit 1
+            ;;
+    esac
+fi
+
+if [ "$TARGET" = "image" ] && [ -n "$OS" ]; then
+    echo "Error: --os is only valid with --target binary." >&2
+    exit 1
+fi
+
+if [ "$TARGET" = "binary" ] && [ -n "$ARCH" ] && [ -z "$OS" ]; then
+    echo "Error: --arch with --target binary requires --os." >&2
+    exit 1
+fi
+
+if [ "$TARGET" = "binary" ] && [ "$OS" = "windows" ] && [ "$ARCH" = "arm64" ]; then
+    echo "Error: Windows binary builds currently support amd64 only." >&2
+    exit 1
+fi
+
 if [ "$MODE" = "release" ]; then
     if [ -n "$REQUESTED_VERSION" ]; then
         echo "Error: --version is only valid with --dev." >&2
-        exit 1
-    fi
-
-    if [ -n "$ARCH" ]; then
-        echo "Error: --arch is only valid with --dev." >&2
         exit 1
     fi
 else
     if [ -z "$REQUESTED_VERSION" ]; then
         echo "Error: --version is required with --dev." >&2
         exit 1
-    fi
-
-    if [ -n "$ARCH" ]; then
-        case "$ARCH" in
-            amd64|arm64)
-                ;;
-            *)
-                echo "Error: unsupported architecture: $ARCH" >&2
-                echo "Supported architectures: amd64, arm64" >&2
-                exit 1
-                ;;
-        esac
     fi
 fi
 
@@ -589,7 +614,8 @@ require_command awk
 require_command cut
 require_command tr
 
-if [ "$TARGET" = "windows" ]; then
+if [ "$TARGET" = "binary" ]; then
+    require_command tar
     require_command zip
 fi
 
@@ -604,37 +630,32 @@ if [ ! -f "$REPO_DIR/Dockerfile" ]; then
 fi
 
 mkdir -p "$DIST_DIR"
-
 git_metadata
+
+# -----------------------------------------------------------------------------
+# Prepare source/version
+# -----------------------------------------------------------------------------
+
+if [ "$MODE" = "release" ]; then
+    require_clean_release_tree
+    prepare_release
+else
+    prepare_dev
+fi
 
 # -----------------------------------------------------------------------------
 # Build
 # -----------------------------------------------------------------------------
 
-if [ "$MODE" = "release" ]; then
-    require_clean_release_tree
-
-    echo "Checking latest stable Caddy release..."
-    discover_latest_stable
-
-    echo "Resolving stable Caddy tag to exact upstream commit..."
-    resolve_release_ref
-
-    case "$TARGET" in
-        image)
+case "$TARGET" in
+    image)
+        if [ "$MODE" = "release" ]; then
             build_release_image
-            ;;
-        windows)
-            build_release_windows
-            ;;
-    esac
-else
-    case "$TARGET" in
-        image)
+        else
             build_dev_image
-            ;;
-        windows)
-            build_dev_windows
-            ;;
-    esac
-fi
+        fi
+        ;;
+    binary)
+        build_selected_binaries
+        ;;
+esac
