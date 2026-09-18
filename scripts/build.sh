@@ -5,7 +5,7 @@ set -eu
 # Script:       build.sh
 # Author:       Andrew J. Moore
 # Date:         2026-09-18
-# Revision:     r3
+# Revision:     r4
 #
 # Description:
 #   Shared Caddy artifact builder for release and development workflows.
@@ -24,7 +24,8 @@ set -eu
 #       upstream-style ZIP archive, and writes it under dist/.
 #
 #   Release builds:
-#     - Automatically use the latest stable upstream Caddy release.
+#     - Automatically discover the latest stable upstream Caddy release.
+#     - Resolve the stable tag to its exact upstream commit before compiling.
 #     - Require a clean Git working tree.
 #     - Produce artifacts suitable for later publication by publish.sh.
 #
@@ -157,6 +158,13 @@ discover_latest_stable() {
     CADDY_VERSION="${RELEASE_TAG#v}"
 }
 
+resolve_release_ref() {
+    resolve_dev_ref "$CADDY_REF"
+
+    CADDY_RELEASE_COMMIT="$CADDY_COMMIT"
+    CADDY_RELEASE_COMMIT_SHORT="$CADDY_COMMIT_SHORT"
+}
+
 resolve_dev_ref() {
     REF="$1"
 
@@ -259,6 +267,7 @@ build_release_image() {
     echo
     echo "Building release Linux image..."
     echo "  Caddy ref:     $CADDY_REF"
+    echo "  Resolved SHA:  $CADDY_RELEASE_COMMIT_SHORT"
     echo "  Version:       $CADDY_VERSION"
     echo "  Platforms:     linux/amd64,linux/arm64"
     echo "  Image name:    $VERSION_IMAGE"
@@ -270,7 +279,7 @@ build_release_image() {
     docker buildx build \
         --target image \
         --platform "linux/amd64,linux/arm64" \
-        --build-arg "CADDY_REF=$CADDY_REF" \
+        --build-arg "CADDY_REF=$CADDY_RELEASE_COMMIT" \
         --build-arg "CADDY_BUILDER_VERSION=$CADDY_VERSION" \
         --build-arg "CADDY_RUNTIME_VERSION=$CADDY_VERSION" \
         --label "org.opencontainers.image.title=GES Caddy" \
@@ -281,6 +290,7 @@ build_release_image() {
         --label "org.opencontainers.image.created=$BUILD_CREATED" \
         --label "io.ges.build.branch=$GIT_BRANCH" \
         --label "io.ges.build.caddy-ref=$CADDY_REF" \
+        --label "io.ges.build.caddy-revision=$CADDY_RELEASE_COMMIT" \
         --tag "$VERSION_IMAGE" \
         --output "type=oci,dest=$OUTPUT" \
         "$REPO_DIR"
@@ -306,6 +316,7 @@ build_release_windows() {
     echo
     echo "Building release Windows executable..."
     echo "  Caddy ref:     $CADDY_REF"
+    echo "  Resolved SHA:  $CADDY_RELEASE_COMMIT_SHORT"
     echo "  Version:       $CADDY_VERSION"
     echo "  Platform:      windows/$ARCH"
     echo "  Archive:       $OUTPUT"
@@ -317,7 +328,7 @@ build_release_windows() {
     docker buildx build \
         --target binary \
         --platform "windows/$ARCH" \
-        --build-arg "CADDY_REF=$CADDY_REF" \
+        --build-arg "CADDY_REF=$CADDY_RELEASE_COMMIT" \
         --build-arg "CADDY_BUILDER_VERSION=$CADDY_VERSION" \
         --build-arg "CADDY_RUNTIME_VERSION=$CADDY_VERSION" \
         --output "type=local,dest=$TMP_DIR/export" \
@@ -605,6 +616,9 @@ if [ "$MODE" = "release" ]; then
 
     echo "Checking latest stable Caddy release..."
     discover_latest_stable
+
+    echo "Resolving stable Caddy tag to exact upstream commit..."
+    resolve_release_ref
 
     case "$TARGET" in
         image)
