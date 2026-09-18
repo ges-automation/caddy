@@ -2,7 +2,7 @@
 # Makefile
 # Author:       Andrew J. Moore
 # Date:         2026-09-18
-# Revision:     r1
+# Revision:     r2
 #
 # Description:
 #   Front-end for the Caddy build and publication workflow.
@@ -35,6 +35,9 @@
 #   make dev-image VERSION=master
 #   make dev-binary VERSION=master
 #   make dev-binary VERSION=master OS=linux ARCH=arm64
+#
+#   make clean
+#       Remove dist/ and local images belonging to this build workflow.
 # =============================================================================
 
 .DEFAULT_GOAL := release
@@ -117,6 +120,15 @@ require-version:
 
 clean:
 	rm -rf dist
+	@images="$$(docker image ls --format '{{.Repository}}:{{.Tag}}' | \
+		grep -E '^(caddy:.*-dev|ghcr\.io/gesandrewmoore/caddy:)' || true)"; \
+	if [ -n "$$images" ]; then \
+		echo "Removing local Caddy build images:"; \
+		printf '%s\n' "$$images"; \
+		printf '%s\n' "$$images" | xargs -r docker image rm; \
+	else \
+		echo "No local Caddy build images to remove."; \
+	fi
 
 help:
 	@printf '%s\n' \
@@ -140,6 +152,6 @@ help:
 		'  make dev-binary VERSION=<ref> [OS=linux|windows] [ARCH=amd64|arm64]' \
 		'' \
 		'Housekeeping:' \
-		'  make clean' \
+		'  make clean                Remove dist/ and local Caddy build images' \
 		'  make help' \
 		''
