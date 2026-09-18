@@ -5,7 +5,7 @@ set -eu
 # Script:       publish.sh
 # Author:       Andrew J. Moore
 # Date:         2026-09-18
-# Revision:     r1
+# Revision:     r2
 #
 # Description:
 #   Publish previously built canonical Caddy release artifacts.
@@ -39,17 +39,22 @@ set -eu
 #
 # Authentication:
 #   GHCR:
-#     GHCR_PAT_OP_REF must contain a 1Password secret reference readable by
-#     `op read`. The token must have permission to publish to GHCR.
+#     GHCR_PAT_OP_REF must point to a 1Password item, not an individual field.
+#     The item must contain:
+#
+#       username
+#       credential
+#
+#     The credential must have permission to publish to GHCR.
 #
 #   GitHub Releases:
-#     GITHUB_PAT_OP_REF may contain a separate 1Password secret reference.
-#     If omitted, GHCR_PAT_OP_REF is reused. The token must have sufficient
-#     GitHub repository permissions to create releases and upload assets.
+#     GITHUB_PAT_OP_REF may point to a separate 1Password item with the same
+#     username/credential field convention. If omitted, GHCR_PAT_OP_REF is
+#     reused. The credential must have sufficient GitHub repository
+#     permissions to create releases and upload assets.
 #
 # Optional environment:
-#   GHCR_USERNAME       Default: gesandrewmoore
-#   GHCR_PAT_OP_REF     Required for image publication
+#   GHCR_PAT_OP_REF     Required for image publication; 1Password item ref
 #   GITHUB_PAT_OP_REF   Optional; defaults to GHCR_PAT_OP_REF
 #
 # Usage:
@@ -66,7 +71,6 @@ CADDY_RELEASE_API="https://api.github.com/repos/caddyserver/caddy/releases/lates
 IMAGE_REPO="ghcr.io/gesandrewmoore/caddy"
 GITHUB_REPO="gesandrewmoore/caddy"
 GHCR_REGISTRY="ghcr.io"
-GHCR_USERNAME="${GHCR_USERNAME:-gesandrewmoore}"
 
 TARGET=""
 
@@ -175,23 +179,24 @@ check_origin_main() {
     esac
 }
 
-read_op_secret() {
-    REF="$1"
-    LABEL="$2"
+read_op_item_field() {
+    ITEM_REF="$1"
+    FIELD="$2"
+    LABEL="$3"
 
-    if [ -z "$REF" ]; then
+    if [ -z "$ITEM_REF" ]; then
         echo "Error: $LABEL is not set." >&2
         exit 1
     fi
 
-    SECRET="$(op read "$REF")"
+    VALUE="$(op read "${ITEM_REF}/${FIELD}")"
 
-    if [ -z "$SECRET" ]; then
-        echo "Error: 1Password returned an empty secret for $LABEL." >&2
+    if [ -z "$VALUE" ]; then
+        echo "Error: 1Password returned an empty ${FIELD} field for $LABEL." >&2
         exit 1
     fi
 
-    printf '%s' "$SECRET"
+    printf '%s' "$VALUE"
 }
 
 publish_image() {
@@ -221,7 +226,8 @@ publish_image() {
     }
     trap cleanup_tmp EXIT INT TERM
 
-    GHCR_PAT="$(read_op_secret "$GHCR_PAT_OP_REF" "GHCR_PAT_OP_REF")"
+    GHCR_USERNAME="$(read_op_item_field "$GHCR_PAT_OP_REF" "username" "GHCR_PAT_OP_REF")"
+    GHCR_PAT="$(read_op_item_field "$GHCR_PAT_OP_REF" "credential" "GHCR_PAT_OP_REF")"
 
     printf '%s' "$GHCR_PAT" |
         skopeo login \
@@ -295,14 +301,14 @@ publish_windows() {
         exit 1
     fi
 
-    GITHUB_SECRET_REF="${GITHUB_PAT_OP_REF:-${GHCR_PAT_OP_REF:-}}"
+    GITHUB_ITEM_REF="${GITHUB_PAT_OP_REF:-${GHCR_PAT_OP_REF:-}}"
 
-    if [ -z "$GITHUB_SECRET_REF" ]; then
+    if [ -z "$GITHUB_ITEM_REF" ]; then
         echo "Error: GITHUB_PAT_OP_REF or GHCR_PAT_OP_REF is required to publish the GitHub Release." >&2
         exit 1
     fi
 
-    GITHUB_PAT="$(read_op_secret "$GITHUB_SECRET_REF" "GitHub PAT 1Password reference")"
+    GITHUB_PAT="$(read_op_item_field "$GITHUB_ITEM_REF" "credential" "GitHub PAT 1Password item")"
 
     echo
     echo "Publishing release Windows artifact..."
