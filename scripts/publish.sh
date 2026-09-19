@@ -5,7 +5,7 @@ set -eu
 # Script:       publish.sh
 # Author:       Andrew J. Moore
 # Date:         2026-09-18
-# Revision:     r3
+# Revision:     r4
 #
 # Description:
 #   Publish previously built canonical Caddy release artifacts.
@@ -39,6 +39,9 @@ set -eu
 #     commit to be pushed, though the normal origin/main warning still applies.
 #
 # Authentication:
+#   If the 1Password CLI is not already authenticated, the script prompts for
+#   sign-in using `op signin`, matching the Dex publication workflow.
+#
 #   GHCR_PAT_OP_REF points to a 1Password item containing:
 #     username
 #     credential
@@ -103,6 +106,17 @@ require_command() {
         echo "Error: required command not found: $1" >&2
         exit 1
     fi
+}
+
+ensure_op_session() {
+    if op whoami >/dev/null 2>&1; then
+        return
+    fi
+
+    echo "1Password CLI is not currently signed in."
+    echo "Starting 1Password sign-in..."
+    eval "$(op signin)"
+    echo
 }
 
 discover_latest_stable() {
@@ -553,6 +567,8 @@ require_command curl
 require_command grep
 require_command sed
 require_command op
+
+ensure_op_session
 
 case "$TARGET" in
     image)

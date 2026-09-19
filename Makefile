@@ -2,7 +2,7 @@
 # Makefile
 # Author:       Andrew J. Moore
 # Date:         2026-09-18
-# Revision:     r2
+# Revision:     r3
 #
 # Description:
 #   Front-end for the Caddy build and publication workflow.
@@ -37,7 +37,8 @@
 #   make dev-binary VERSION=master OS=linux ARCH=arm64
 #
 #   make clean
-#       Remove dist/ and local images belonging to this build workflow.
+#       Remove dist/, local images belonging to this build workflow, and
+#       Docker Buildx build cache.
 # =============================================================================
 
 .DEFAULT_GOAL := release
@@ -129,6 +130,8 @@ clean:
 	else \
 		echo "No local Caddy build images to remove."; \
 	fi
+	@echo "Clearing Docker Buildx build cache..."
+	docker buildx prune --all --force
 
 help:
 	@printf '%s\n' \
@@ -152,6 +155,6 @@ help:
 		'  make dev-binary VERSION=<ref> [OS=linux|windows] [ARCH=amd64|arm64]' \
 		'' \
 		'Housekeeping:' \
-		'  make clean                Remove dist/ and local Caddy build images' \
+		'  make clean                Remove dist/, local Caddy images, and build cache' \
 		'  make help' \
 		''
