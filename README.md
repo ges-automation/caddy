@@ -30,6 +30,14 @@ The workflow produces two artifact classes:
 
 The scripts are the implementation layer. The Makefile is the normal front-end.
 
+Current workflow revisions documented here:
+
+```text
+Makefile:           r3
+scripts/build.sh:   r5
+scripts/publish.sh: r4
+```
+
 ## Canonical release artifacts
 
 A stable release produces:
@@ -136,7 +144,7 @@ Publication additionally requires:
 
 - `skopeo` for GHCR image publication
 - GitHub CLI (`gh`) for GitHub Release publication
-- 1Password CLI (`op`) for credential retrieval
+- 1Password CLI (`op`) for credential retrieval and interactive sign-in when required
 
 On Debian:
 
@@ -148,6 +156,20 @@ apt install -y git curl make tar zip skopeo gh
 Docker and the 1Password CLI are installed separately.
 
 ## Authentication
+
+Before publication, `publish.sh` verifies that the 1Password CLI is authenticated:
+
+```bash
+op whoami
+```
+
+If no active 1Password CLI session exists, the script starts an interactive sign-in:
+
+```bash
+eval "$(op signin)"
+```
+
+This matches the publication workflow used by the GES Dex build project.
 
 ### GitHub Container Registry
 
@@ -312,13 +334,24 @@ make dev-binary VERSION=master OS=linux ARCH=arm64
 make help
 ```
 
-### Clean local artifacts
+### Clean local artifacts and build cache
 
 ```bash
 make clean
 ```
 
-This removes the local `dist/` directory.
+This removes:
+
+- the local `dist/` directory
+- local development images matching `caddy:*-dev`
+- local images matching `ghcr.io/gesandrewmoore/caddy:*`
+- the full Docker Buildx build cache via:
+
+```bash
+docker buildx prune --all --force
+```
+
+Upstream base images such as `caddy:<VERSION>` and `caddy:<VERSION>-builder` are intentionally left alone.
 
 ## Direct script usage
 
