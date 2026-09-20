@@ -58,8 +58,8 @@ DIST_DIR="$REPO_DIR/dist"
 
 CADDY_GIT_URL="https://github.com/caddyserver/caddy.git"
 CADDY_RELEASE_API="https://api.github.com/repos/caddyserver/caddy/releases/latest"
-SOURCE_URL="https://github.com/gesandrewmoore/caddy"
-IMAGE_REPO="ghcr.io/gesandrewmoore/caddy"
+SOURCE_URL="https://github.com/ges-automation/caddy"
+IMAGE_REPO="ghcr.io/ges-automation/caddy"
 LOCAL_IMAGE_REPO="caddy"
 
 TARGET=""
@@ -131,7 +131,7 @@ discover_latest_stable() {
     RELEASE_JSON="$(
         curl -fsSL \
             -H "Accept: application/vnd.github+json" \
-            -H "User-Agent: gesandrewmoore-caddy-build" \
+            -H "User-Agent: ges-automation-caddy-build" \
             "$CADDY_RELEASE_API"
     )"
 

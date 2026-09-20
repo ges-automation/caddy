@@ -65,8 +65,8 @@ The platform, architecture, and Caddy version are carried by the archive filenam
 The published container image uses:
 
 ```text
-ghcr.io/gesandrewmoore/caddy:<VERSION>
-ghcr.io/gesandrewmoore/caddy:latest
+ghcr.io/ges-automation/caddy:<VERSION>
+ghcr.io/ges-automation/caddy:latest
 ```
 
 Both `linux/amd64` and `linux/arm64` are contained in the same multi-platform image index.
@@ -344,7 +344,7 @@ This removes:
 
 - the local `dist/` directory
 - local development images matching `caddy:*-dev`
-- local images matching `ghcr.io/gesandrewmoore/caddy:*`
+- local images matching `ghcr.io/ges-automation/caddy:*`
 - the full Docker Buildx build cache via:
 
 ```bash
@@ -458,13 +458,13 @@ The image is **not rebuilt** during publication.
 `skopeo copy --all` copies the complete OCI index to:
 
 ```text
-ghcr.io/gesandrewmoore/caddy:<VERSION>
+ghcr.io/ges-automation/caddy:<VERSION>
 ```
 
 The exact same image is then promoted to:
 
 ```text
-ghcr.io/gesandrewmoore/caddy:latest
+ghcr.io/ges-automation/caddy:latest
 ```
 
 The publication script verifies that both tags resolve to the same top-level manifest digest.

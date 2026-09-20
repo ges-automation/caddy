@@ -122,7 +122,7 @@ require-version:
 clean:
 	rm -rf dist
 	@images="$$(docker image ls --format '{{.Repository}}:{{.Tag}}' | \
-		grep -E '^(caddy:.*-dev|ghcr\.io/gesandrewmoore/caddy:)' || true)"; \
+		grep -E '^(caddy:.*-dev|ghcr\.io/ges-automation/caddy:)' || true)"; \
 	if [ -n "$$images" ]; then \
 		echo "Removing local Caddy build images:"; \
 		printf '%s\n' "$$images"; \

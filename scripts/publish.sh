@@ -13,8 +13,8 @@ set -eu
 #   Artifact classes:
 #     image
 #       Publish the existing multi-platform OCI archive to GHCR as:
-#         ghcr.io/gesandrewmoore/caddy:<VERSION>
-#         ghcr.io/gesandrewmoore/caddy:latest
+#         ghcr.io/ges-automation/caddy:<VERSION>
+#         ghcr.io/ges-automation/caddy:latest
 #
 #     binary
 #       Publish standalone binary packages to GitHub Release v<VERSION>.
@@ -63,8 +63,8 @@ DIST_DIR="$REPO_DIR/dist"
 
 CADDY_RELEASE_API="https://api.github.com/repos/caddyserver/caddy/releases/latest"
 
-IMAGE_REPO="ghcr.io/gesandrewmoore/caddy"
-GITHUB_REPO="gesandrewmoore/caddy"
+IMAGE_REPO="ghcr.io/ges-automation/caddy"
+GITHUB_REPO="ges-automation/caddy"
 GHCR_REGISTRY="ghcr.io"
 
 TARGET=""
@@ -123,7 +123,7 @@ discover_latest_stable() {
     RELEASE_JSON="$(
         curl -fsSL \
             -H "Accept: application/vnd.github+json" \
-            -H "User-Agent: gesandrewmoore-caddy-publish" \
+            -H "User-Agent: ges-automation-caddy-publish" \
             "$CADDY_RELEASE_API"
     )"
 

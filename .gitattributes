@@ -1,0 +1,2 @@
+# Keep text files Linux-compatible regardless of the contributor's platform.
+* text=auto eol=lf
