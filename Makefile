@@ -1,119 +1,77 @@
 # =============================================================================
 # Makefile
 # Author:       Andrew J. Moore
-# Date:         2026-09-18
-# Revision:     r3
+# Date:         2026-09-21
+# Revision:     r4
 #
 # Description:
 #   Front-end for the Caddy build and publication workflow.
 #
 #   The shell scripts remain the implementation layer; this Makefile only
-#   orchestrates them.
+#   exposes the standard repository actions that this project supports.
 #
 # Common usage:
 #
 #   make
-#   make release
-#       Build and publish the complete canonical release.
-#
-#   make build
-#       Build the canonical image and all canonical binary packages.
-#
-#   make publish
-#       Publish already-built canonical image and binary packages.
+#   make package
+#       Create all canonical standalone binary packages locally.
 #
 #   make image
-#   make binary
-#   make binary OS=linux
-#   make binary OS=linux ARCH=arm64
+#       Build the canonical multi-platform OCI image archive locally.
 #
-#   make publish-image
-#   make publish-binary
-#   make publish-binary OS=linux ARCH=amd64
+#   make package VERSION=master
+#   make image VERSION=master
+#       Create development artifacts from an upstream Caddy ref.
 #
-#   make dev VERSION=master
-#   make dev-image VERSION=master
-#   make dev-binary VERSION=master
-#   make dev-binary VERSION=master OS=linux ARCH=arm64
+#   make image-push
+#       Publish the canonical image to GHCR.
+#
+#   make release
+#       Publish canonical binary packages to a GitHub Release.
 #
 #   make clean
 #       Remove dist/, local images belonging to this build workflow, and
 #       Docker Buildx build cache.
 # =============================================================================
 
-.DEFAULT_GOAL := release
+.DEFAULT_GOAL := package
 
 BUILD_SCRIPT   := ./scripts/build.sh
 PUBLISH_SCRIPT := ./scripts/publish.sh
 
 OS_ARG      = $(if $(strip $(OS)),--os $(OS),)
 ARCH_ARG    = $(if $(strip $(ARCH)),--arch $(ARCH),)
-VERSION_ARG = $(if $(strip $(VERSION)),--version $(VERSION),)
+DEV_ARGS    = $(if $(strip $(VERSION)),--dev --version "$(VERSION)",)
 
-.PHONY: \
-	release build publish \
-	image binary \
-	publish-image publish-binary \
-	dev dev-image dev-binary \
-	clean help \
-	require-version
+.PHONY: package image image-push release clean help
 
 # -----------------------------------------------------------------------------
-# Canonical release
+# Local artifacts
 # -----------------------------------------------------------------------------
 
-release:
-	$(MAKE) build
-	$(MAKE) publish
-
-build:
-	$(MAKE) image
-	$(MAKE) binary
-
-publish:
-	$(MAKE) publish-image
-	$(MAKE) publish-binary
-
-# -----------------------------------------------------------------------------
-# Release builds
-# -----------------------------------------------------------------------------
+package:
+	$(BUILD_SCRIPT) --target binary $(OS_ARG) $(ARCH_ARG) $(DEV_ARGS)
 
 image:
-	$(BUILD_SCRIPT) --target image
-
-binary:
-	$(BUILD_SCRIPT) --target binary $(OS_ARG) $(ARCH_ARG)
+	$(BUILD_SCRIPT) --target image $(ARCH_ARG) $(DEV_ARGS)
 
 # -----------------------------------------------------------------------------
-# Release publication
+# External publication
 # -----------------------------------------------------------------------------
 
-publish-image:
-	$(PUBLISH_SCRIPT) --target image
-
-publish-binary:
-	$(PUBLISH_SCRIPT) --target binary $(OS_ARG) $(ARCH_ARG)
-
-# -----------------------------------------------------------------------------
-# Development builds
-# -----------------------------------------------------------------------------
-
-dev: require-version
-	$(MAKE) dev-image VERSION="$(VERSION)"
-	$(MAKE) dev-binary VERSION="$(VERSION)"
-
-dev-image: require-version
-	$(BUILD_SCRIPT) --target image --dev --version "$(VERSION)" $(ARCH_ARG)
-
-dev-binary: require-version
-	$(BUILD_SCRIPT) --target binary --dev --version "$(VERSION)" $(OS_ARG) $(ARCH_ARG)
-
-require-version:
-	@test -n "$(strip $(VERSION))" || { \
-		echo "Error: VERSION is required for development builds."; \
-		echo "Example: make dev-image VERSION=master"; \
+image-push:
+	@test -z "$(strip $(VERSION))" || { \
+		echo "Error: VERSION is not valid for image-push; only canonical images are published."; \
 		exit 1; \
 	}
+	$(PUBLISH_SCRIPT) --target image
+
+release:
+	@test -z "$(strip $(VERSION))" || { \
+		echo "Error: VERSION is not valid for release; only canonical packages are published."; \
+		exit 1; \
+	}
+	$(PUBLISH_SCRIPT) --target binary $(OS_ARG) $(ARCH_ARG)
 
 # -----------------------------------------------------------------------------
 # Housekeeping
@@ -136,23 +94,19 @@ clean:
 help:
 	@printf '%s\n' \
 		'' \
-		'Canonical release:' \
-		'  make / make release       Build and publish everything' \
-		'  make build                Build image + all binaries' \
-		'  make publish              Publish existing image + binaries' \
+		'Local artifact targets:' \
+		'  make / make package       Create all standalone binary packages' \
+		'  make package [OS=linux|windows] [ARCH=amd64|arm64]' \
+		'  make image                Build the multi-platform OCI image archive' \
 		'' \
-		'Release build targets:' \
-		'  make image' \
-		'  make binary [OS=linux|windows] [ARCH=amd64|arm64]' \
+		'Development builds:' \
+		'  make package VERSION=<ref> [OS=linux|windows] [ARCH=amd64|arm64]' \
+		'  make image VERSION=<ref> [ARCH=amd64|arm64]' \
 		'' \
-		'Release publish targets:' \
-		'  make publish-image' \
-		'  make publish-binary [OS=linux|windows] [ARCH=amd64|arm64]' \
-		'' \
-		'Development targets:' \
-		'  make dev VERSION=<ref>' \
-		'  make dev-image VERSION=<ref> [ARCH=amd64|arm64]' \
-		'  make dev-binary VERSION=<ref> [OS=linux|windows] [ARCH=amd64|arm64]' \
+		'External publication targets:' \
+		'  make image-push           Push the canonical image to GHCR' \
+		'  make release [OS=linux|windows] [ARCH=amd64|arm64]' \
+		'                             Publish packages to a GitHub Release' \
 		'' \
 		'Housekeeping:' \
 		'  make clean                Remove dist/, local Caddy images, and build cache' \

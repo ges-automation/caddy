@@ -33,7 +33,7 @@ The scripts are the implementation layer. The Makefile is the normal front-end.
 Current workflow revisions documented here:
 
 ```text
-Makefile:           r3
+Makefile:           r4
 scripts/build.sh:   r5
 scripts/publish.sh: r4
 ```
@@ -96,10 +96,10 @@ Development builds accept an upstream Caddy:
 Examples:
 
 ```bash
-make dev-image VERSION=master
-make dev-image VERSION=v2.11.4
-make dev-binary VERSION=master
-make dev-binary VERSION=master OS=linux ARCH=arm64
+make image VERSION=master
+make image VERSION=v2.11.4
+make package VERSION=master
+make package VERSION=master OS=linux ARCH=arm64
 ```
 
 Development artifacts use the requested ref as their visible version identifier, normalized for safe Docker and filename use, with `-dev` appended.
@@ -213,120 +213,84 @@ The token must have permission to create releases and upload release assets to t
 
 ## Make workflow
 
-### Complete canonical release
+The Makefile follows the standard repository action vocabulary. It exposes
+only actions backed by a real Caddy workflow capability:
+
+- `package` creates local distributable binary archives.
+- `image` builds a local container image artifact.
+- `image-push` publishes the canonical image to GHCR.
+- `release` publishes canonical binary packages to GitHub Releases.
+
+The project does not expose `build`, `test`, or `publish` targets because it
+does not have distinct compile-only, test-suite, or local application-publish
+operations. Packaging and image creation compile Caddy as part of producing
+their respective local artifacts.
+
+External publication is never part of the default target or a dependency of a
+local target.
+
+### Standalone binary packages
+
+The safe default creates all canonical standalone binary packages locally:
 
 ```bash
 make
+# equivalent to: make package
 ```
 
-or:
+Create selected packages:
 
 ```bash
-make release
+make package OS=linux
+make package OS=linux ARCH=amd64
+make package OS=linux ARCH=arm64
+make package OS=windows ARCH=amd64
 ```
-
-This performs:
-
-```text
-build
-  image
-  binaries
-
-publish
-  image
-  binaries
-```
-
-### Build everything without publishing
-
-```bash
-make build
-```
-
-### Publish already-built artifacts
-
-```bash
-make publish
-```
-
-`make publish` does not rebuild artifacts.
 
 ### Container image
 
-Build:
+Build the canonical multi-platform OCI image archive locally:
 
 ```bash
 make image
 ```
 
-Publish:
+### Development artifacts
+
+Set `VERSION` to an upstream Caddy branch, tag, or full commit SHA to create a
+development artifact through the same standard local targets:
 
 ```bash
-make publish-image
+make package VERSION=master
+make package VERSION=master OS=linux ARCH=arm64
+make image VERSION=master
+make image VERSION=master ARCH=arm64
 ```
 
-### Standalone binaries
+### External publication
 
-Build all canonical binaries:
+Push the already-built canonical image to GHCR:
 
 ```bash
-make binary
+make image-push
 ```
 
-Build selected binaries:
+Publish all already-built canonical binary packages to GitHub Releases:
 
 ```bash
-make binary OS=linux
-make binary OS=linux ARCH=amd64
-make binary OS=linux ARCH=arm64
-make binary OS=windows ARCH=amd64
+make release
 ```
 
-Publish all canonical binary packages:
+Publish selected canonical packages:
 
 ```bash
-make publish-binary
+make release OS=linux
+make release OS=linux ARCH=arm64
+make release OS=windows ARCH=amd64
 ```
 
-Publish selected binary packages:
-
-```bash
-make publish-binary OS=linux
-make publish-binary OS=linux ARCH=arm64
-make publish-binary OS=windows ARCH=amd64
-```
-
-### Development builds
-
-Build the complete development set:
-
-```bash
-make dev VERSION=master
-```
-
-Build only the development image:
-
-```bash
-make dev-image VERSION=master
-```
-
-Build a development image for a single architecture:
-
-```bash
-make dev-image VERSION=master ARCH=arm64
-```
-
-Build all development binaries:
-
-```bash
-make dev-binary VERSION=master
-```
-
-Build a selected development binary:
-
-```bash
-make dev-binary VERSION=master OS=linux ARCH=arm64
-```
+`image-push` and `release` never rebuild artifacts. They reject `VERSION`
+because development artifacts are local-only.
 
 ### Help
 
