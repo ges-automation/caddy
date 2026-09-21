@@ -1,14 +1,17 @@
-# =============================================================================
-# Makefile
-# Author:       Andrew J. Moore
-# Date:         2026-09-21
-# Revision:     r4
+# SPDX-FileCopyrightText: © 2026 GES Automation Technology, Inc.
+# SPDX-FileContributor: Andrew J. Moore
+# SPDX-License-Identifier: 0BSD
 #
-# Description:
-#   Front-end for the Caddy build and publication workflow.
-#
-#   The shell scripts remain the implementation layer; this Makefile only
-#   exposes the standard repository actions that this project supports.
+# ------------------------------------------------------------------------------------------
+# File:        Makefile
+# Revision:    r5
+# Modified:    2026-09-21
+# Author:      Andrew J. Moore
+# License:     BSD Zero Clause License (0BSD)
+# Source:      https://github.com/ges-automation/caddy
+# Description: Exposes standard local packaging, image, publication, and cleanup actions
+#              while delegating substantive implementation to scripts.
+# ------------------------------------------------------------------------------------------
 #
 # Common usage:
 #
@@ -32,7 +35,6 @@
 #   make clean
 #       Remove dist/, local images belonging to this build workflow, and
 #       Docker Buildx build cache.
-# =============================================================================
 
 .DEFAULT_GOAL := package
 

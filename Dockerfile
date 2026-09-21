@@ -1,7 +1,18 @@
 # syntax=docker/dockerfile:1
-
-# =============================================================================
-# GES Caddy build
+# SPDX-FileCopyrightText: © 2026 GES Automation Technology, Inc.
+# SPDX-FileContributor: Andrew J. Moore
+# SPDX-License-Identifier: 0BSD
+#
+# ------------------------------------------------------------------------------------------
+# File:        Dockerfile
+# Revision:    r1
+# Modified:    2026-09-21
+# Author:      Andrew J. Moore
+# License:     BSD Zero Clause License (0BSD)
+# Source:      https://github.com/ges-automation/caddy
+# Description: Cross-compiles Caddy with the GES module set and defines standalone-binary
+#              and Linux container-image output stages for Docker Buildx.
+# ------------------------------------------------------------------------------------------
 #
 # This Dockerfile is intentionally generic:
 #   - CADDY_REF selects the Caddy source to compile (tag, branch, commit, latest).
@@ -11,7 +22,6 @@
 #
 # The build stage always runs on BUILDPLATFORM, allowing Go/xcaddy to
 # cross-compile without executing the target-architecture binary.
-# =============================================================================
 
 ARG CADDY_BUILDER_VERSION=latest
 ARG CADDY_RUNTIME_VERSION=latest

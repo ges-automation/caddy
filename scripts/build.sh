@@ -1,56 +1,53 @@
 #!/bin/sh
-set -eu
-
+# SPDX-FileCopyrightText: © 2026 GES Automation Technology, Inc.
+# SPDX-FileContributor: Andrew J. Moore
+# SPDX-License-Identifier: 0BSD
+#
 # =============================================================================
-# Script:       build.sh
+# Script:       scripts/build.sh
 # Author:       Andrew J. Moore
-# Date:         2026-09-18
-# Revision:     r5
+# Revised:      2026-09-21
+# Revision:     r6
+# Source:       https://github.com/ges-automation/caddy
 #
-# Description:
-#   Shared Caddy artifact builder for release and development workflows.
+# Purpose:
+#   Builds canonical or development Caddy container images and standalone
+#   executable packages through Docker Buildx. Stable builds resolve the latest
+#   upstream Caddy release; development builds resolve a requested upstream ref.
 #
-#   Artifact classes:
-#     image
-#       OCI/container image.
+# Comments:
+#   Stable builds require a clean repository and export a multi-platform OCI
+#   archive or canonical binary packages under dist/. Development builds allow
+#   a dirty repository, append "-dev" to artifact versions, and load images into
+#   the local Docker image store.
 #
-#     binary
-#       Standalone Caddy executable package.
+# Dependencies:
+#   POSIX shell and standard utilities - Script execution and artifact handling.
+#   Git - Repository metadata and upstream Caddy ref resolution.
+#   Docker Engine with Buildx - Containerized compilation and image creation.
+#   curl - Latest stable Caddy release discovery through the GitHub API.
+#   tar and zip - Standalone binary package creation.
+#   Debian/Ubuntu: apt install git curl make tar zip
+#   Docker: https://docs.docker.com/engine/install/
 #
-#   Canonical release artifacts:
-#     image:
-#       caddy-<VERSION>-linux-multiarch.oci.tar
-#
-#     binary:
-#       caddy-<VERSION>-linux-amd64.tar.gz
-#       caddy-<VERSION>-linux-arm64.tar.gz
-#       caddy-<VERSION>-windows-amd64.zip
-#
-#   Development artifacts use the same naming with "-dev" after VERSION.
-#
-#   Release builds:
-#     - Automatically discover the latest stable upstream Caddy release.
-#     - Resolve the stable tag to its exact upstream commit before compiling.
-#     - Require a clean Git working tree.
-#
-#   Development builds:
-#     - Require --version <ref>.
-#     - Resolve that upstream Caddy ref to an exact commit before compiling.
-#     - Allow a dirty local working tree.
-#     - Use the requested ref as the visible version identifier, normalized for
-#       safe Docker/file naming, with "-dev" appended.
+# Environment:
+#   No environment-variable overrides are supported.
 #
 # Usage:
-#   ./scripts/build.sh --target image
-#   ./scripts/build.sh --target binary
-#   ./scripts/build.sh --target binary --os linux --arch amd64
-#   ./scripts/build.sh --target binary --os linux --arch arm64
-#   ./scripts/build.sh --target binary --os windows --arch amd64
+#   ./scripts/build.sh --target image [--dev --version <ref> [--arch <arch>]]
+#   ./scripts/build.sh --target binary [--os <os> [--arch <arch>]]
+#       [--dev --version <ref>]
 #
-#   ./scripts/build.sh --target image --dev --version master
-#   ./scripts/build.sh --target binary --dev --version master
-#   ./scripts/build.sh --target binary --dev --version master --os linux --arch arm64
+# Arguments:
+#   --target <target> - Required artifact type: image or binary.
+#   --dev             - Build a local development artifact instead of a stable artifact.
+#   --version <ref>   - Upstream branch, tag, or 40-character commit; required with --dev.
+#   --os <os>         - Binary target operating system: linux or windows.
+#   --arch <arch>     - Target architecture: amd64 or arm64; binary use requires --os.
+#   -h, --help        - Print detailed usage information and exit.
 # =============================================================================
+
+set -eu
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 REPO_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"

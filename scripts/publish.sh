@@ -1,61 +1,54 @@
 #!/bin/sh
-set -eu
-
+# SPDX-FileCopyrightText: © 2026 GES Automation Technology, Inc.
+# SPDX-FileContributor: Andrew J. Moore
+# SPDX-License-Identifier: 0BSD
+#
 # =============================================================================
-# Script:       publish.sh
+# Script:       scripts/publish.sh
 # Author:       Andrew J. Moore
-# Date:         2026-09-18
-# Revision:     r4
+# Revised:      2026-09-21
+# Revision:     r5
+# Source:       https://github.com/ges-automation/caddy
 #
-# Description:
-#   Publish previously built canonical Caddy release artifacts.
+# Purpose:
+#   Publishes previously built canonical Caddy artifacts. Image publication
+#   pushes the versioned and latest tags to GHCR; binary publication creates or
+#   updates the corresponding GitHub Release assets.
 #
-#   Artifact classes:
-#     image
-#       Publish the existing multi-platform OCI archive to GHCR as:
-#         ghcr.io/ges-automation/caddy:<VERSION>
-#         ghcr.io/ges-automation/caddy:latest
+# Comments:
+#   Publication never rebuilds artifacts. It requires a clean repository,
+#   refreshes origin refs, and warns before publishing a commit outside
+#   origin/main. Creating a new GitHub Release additionally requires the current
+#   commit to exist on a fetched origin branch or tag.
 #
-#     binary
-#       Publish standalone binary packages to GitHub Release v<VERSION>.
+# Dependencies:
+#   POSIX shell and standard utilities - Script execution and artifact selection.
+#   Git - Repository state, ancestry, and remote-ref validation.
+#   curl - Latest stable Caddy release discovery through the GitHub API.
+#   1Password CLI (op) - Registry and GitHub credential retrieval.
+#   skopeo - OCI archive publication to GHCR for the image target.
+#   GitHub CLI (gh) - GitHub Release publication for the binary target.
+#   Debian/Ubuntu: apt install git curl skopeo gh
+#   1Password CLI: https://developer.1password.com/docs/cli/get-started/
 #
-#       Canonical packages:
-#         caddy-<VERSION>-linux-amd64.tar.gz
-#         caddy-<VERSION>-linux-arm64.tar.gz
-#         caddy-<VERSION>-windows-amd64.zip
-#
-#   This script never rebuilds artifacts.
-#
-# Publication policy:
-#   - Working tree must be clean.
-#   - origin refs are fetched before publication.
-#   - Image publication keeps the existing origin/main ancestry warning with
-#     an explicit [y/N] override.
-#   - Binary publication also warns when HEAD is not contained in origin/main.
-#   - Creating a new GitHub Release additionally requires the current commit to
-#     exist on at least one fetched origin branch or tag. This cannot be
-#     overridden because GitHub cannot target an unpushed commit.
-#   - Updating assets on an existing GitHub Release does not require the current
-#     commit to be pushed, though the normal origin/main warning still applies.
-#
-# Authentication:
-#   If the 1Password CLI is not already authenticated, the script prompts for
-#   sign-in using `op signin`, matching the Dex publication workflow.
-#
-#   GHCR_PAT_OP_REF points to a 1Password item containing:
-#     username
-#     credential
-#
-#   GITHUB_PAT_OP_REF may point to a separate item using the same convention.
-#   If omitted, GHCR_PAT_OP_REF is reused.
+# Environment:
+#   GHCR_PAT_OP_REF  - Required 1Password item for image publication; the item
+#                      must contain username and credential fields.
+#   GITHUB_PAT_OP_REF - Optional 1Password item for GitHub Release publication;
+#                       defaults to GHCR_PAT_OP_REF and must contain credential.
 #
 # Usage:
 #   ./scripts/publish.sh --target image
-#   ./scripts/publish.sh --target binary
-#   ./scripts/publish.sh --target binary --os linux
-#   ./scripts/publish.sh --target binary --os linux --arch arm64
-#   ./scripts/publish.sh --target binary --os windows --arch amd64
+#   ./scripts/publish.sh --target binary [--os <os> [--arch <arch>]]
+#
+# Arguments:
+#   --target <target> - Required publication type: image or binary.
+#   --os <os>         - Binary artifact operating system: linux or windows.
+#   --arch <arch>     - Binary artifact architecture: amd64 or arm64; requires --os.
+#   -h, --help        - Print detailed usage information and exit.
 # =============================================================================
+
+set -eu
 
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 REPO_DIR="$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)"
