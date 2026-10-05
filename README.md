@@ -30,14 +30,6 @@ The workflow produces two artifact classes:
 
 The scripts are the implementation layer. The Makefile is the normal front-end.
 
-Current workflow revisions documented here:
-
-```text
-Makefile:           r5
-scripts/build.sh:   r6
-scripts/publish.sh: r5
-```
-
 ## Canonical release artifacts
 
 A stable release produces:
