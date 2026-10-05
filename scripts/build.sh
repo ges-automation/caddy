@@ -6,8 +6,8 @@
 # =============================================================================
 # Script:       scripts/build.sh
 # Author:       Andrew J. Moore
-# Revised:      2026-09-21
-# Revision:     r6
+# Revised:      2026-10-04
+# Revision:     r7
 # Source:       https://github.com/ges-automation/caddy
 #
 # Purpose:
@@ -115,6 +115,10 @@ Examples:
   ./scripts/build.sh --target binary --dev --version master
   ./scripts/build.sh --target binary --dev --version v2.11.4 --os windows --arch amd64
 EOF
+}
+
+caddy_minor_version() {
+    printf '%s\n' "$1" | awk -F. '{ print $1 "." $2 }'
 }
 
 require_command() {
@@ -256,7 +260,7 @@ prepare_release() {
     BUILD_CADDY_REF="$CADDY_REF"
     BUILD_CADDY_COMMIT="$CADDY_COMMIT"
     BUILD_CADDY_COMMIT_SHORT="$CADDY_COMMIT_SHORT"
-    TOOLCHAIN_VERSION="$CADDY_VERSION"
+    TOOLCHAIN_VERSION="$(caddy_minor_version "$CADDY_VERSION")"
 }
 
 prepare_dev() {
@@ -278,7 +282,7 @@ prepare_dev() {
 
     echo "Checking latest stable Caddy release for builder/runtime base..."
     discover_latest_stable
-    TOOLCHAIN_VERSION="$CADDY_VERSION"
+    TOOLCHAIN_VERSION="$(caddy_minor_version "$CADDY_VERSION")"
 }
 
 build_release_image() {
